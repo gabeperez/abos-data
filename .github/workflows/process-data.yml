@@ -1,0 +1,65 @@
+name: Process ABOS Data
+
+on:
+  push:
+    paths:
+      - 'ticket-sales/raw/**'
+      - 'ad-performance/**'
+  workflow_dispatch:
+
+jobs:
+  process-tickets:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Process new ticket CSV files
+        run: |
+          # Create processed directory if it doesn't exist
+          mkdir -p ticket-sales/processed
+          
+          # Process any new Shift-JIS files in raw/
+          for file in ticket-sales/raw/*.csv; do
+            if [ -f "$file" ]; then
+              echo "Processing: $file"
+              python scripts/process_tickets.py "$file" --output-dir ticket-sales/processed/
+            fi
+          done
+          
+          # Generate daily aggregation
+          if [ -d "ticket-sales/processed" ]; then
+            python scripts/process_tickets.py ticket-sales/processed/ --aggregate-daily --output-dir ticket-sales/processed/
+          fi
+      
+      - name: Commit processed files
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add ticket-sales/processed/
+          
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Auto-process ticket sales CSVs [skip ci]"
+            git push
+          fi
+
+  notify-sync:
+    runs-on: ubuntu-latest
+    needs: process-tickets
+    if: always()
+    
+    steps:
+      - name: Notify completion
+        run: |
+          echo "Data processing complete at $(date)"
+          echo "Files processed and ready for Google Sheets sync"
