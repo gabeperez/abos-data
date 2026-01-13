@@ -68,14 +68,22 @@ def convert_shiftjis_to_utf8(input_path: str, output_path: str) -> dict:
             total_tickets += int(new_row.get('tickets_sold', 0) or 0)
     
     # Extract timestamp from filename
+    # Format: YYYYMMDDHHMMSS_【jd】帳票出力 (e.g., 20251130172053_【jd】帳票出力)
     filename = Path(input_path).stem
-    timestamp_match = re.search(r'(\d{8})(\d{6})?', filename)
+    timestamp_match = re.search(r'(\d{14})', filename)  # Look for 14-digit timestamp
     if timestamp_match:
-        date_str = timestamp_match.group(1)
-        time_str = timestamp_match.group(2) or '000000'
-        snapshot_ts = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}T{time_str[:2]}:{time_str[2:4]}:{time_str[4:6]}"
+        ts = timestamp_match.group(1)
+        # YYYYMMDDHHMMSS
+        snapshot_ts = f"{ts[:4]}-{ts[4:6]}-{ts[6:8]}T{ts[8:10]}:{ts[10:12]}:{ts[12:14]}"
     else:
-        snapshot_ts = datetime.now().isoformat()
+        # Fallback: try 8-digit date + optional 6-digit time
+        timestamp_match = re.search(r'(\d{8})(\d{6})?', filename)
+        if timestamp_match:
+            date_str = timestamp_match.group(1)
+            time_str = timestamp_match.group(2) or '000000'
+            snapshot_ts = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}T{time_str[:2]}:{time_str[2:4]}:{time_str[4:6]}"
+        else:
+            snapshot_ts = datetime.now().isoformat()
     
     # Add snapshot timestamp to all rows
     for row in rows:
@@ -103,7 +111,6 @@ def calculate_deltas(processed_dir: str, output_path: str) -> dict:
     Calculate ticket sales deltas between consecutive snapshots.
     Creates a time-series of actual sales per period.
     """
-    # Load all processed files
     files = sorted(Path(processed_dir).glob('*.csv'))
     
     if len(files) < 2:
@@ -115,7 +122,6 @@ def calculate_deltas(processed_dir: str, output_path: str) -> dict:
         with open(f, 'r', encoding='utf-8') as infile:
             reader = csv.DictReader(infile)
             for row in reader:
-                # Create unique key for each show/ticket combo
                 key = f"{row['show_date']}_{row['show_time']}_{row['ticket_type_no']}"
                 snapshot_data[key] = {
                     'tickets_sold': int(row['tickets_sold'] or 0),
@@ -126,13 +132,11 @@ def calculate_deltas(processed_dir: str, output_path: str) -> dict:
                 }
         snapshots.append(snapshot_data)
     
-    # Calculate deltas
     deltas = []
     for i in range(1, len(snapshots)):
         prev_snapshot = snapshots[i-1]
         curr_snapshot = snapshots[i]
         
-        # Get timestamps
         prev_ts = list(prev_snapshot.values())[0]['snapshot_timestamp'] if prev_snapshot else None
         curr_ts = list(curr_snapshot.values())[0]['snapshot_timestamp'] if curr_snapshot else None
         
@@ -141,7 +145,7 @@ def calculate_deltas(processed_dir: str, output_path: str) -> dict:
             curr_count = curr_data['tickets_sold']
             delta = curr_count - prev_count
             
-            if delta != 0:  # Only record if there were sales
+            if delta != 0:
                 deltas.append({
                     'period_start': prev_ts,
                     'period_end': curr_ts,
@@ -152,7 +156,6 @@ def calculate_deltas(processed_dir: str, output_path: str) -> dict:
                     'cumulative_total': curr_count
                 })
     
-    # Write deltas CSV
     if deltas:
         fieldnames = ['period_start', 'period_end', 'show_date', 'show_time', 
                       'ticket_type', 'tickets_sold', 'cumulative_total']
@@ -171,9 +174,7 @@ def calculate_deltas(processed_dir: str, output_path: str) -> dict:
 def aggregate_daily_totals(processed_dir: str, output_path: str) -> dict:
     """
     Aggregate ticket sales by show_date to get daily totals.
-    Useful for correlation with ad spend.
     """
-    # Get the most recent snapshot
     files = sorted(Path(processed_dir).glob('*.csv'))
     if not files:
         return {'error': 'No processed files found'}
@@ -197,10 +198,8 @@ def aggregate_daily_totals(processed_dir: str, output_path: str) -> dict:
                 daily_totals[show_date]['child'] += tickets
             daily_totals[show_date]['total'] += tickets
     
-    # Convert to rows
     rows = []
     for date, totals in sorted(daily_totals.items()):
-        # Format date as YYYY-MM-DD
         formatted_date = f"{date[:4]}-{date[4:6]}-{date[6:8]}"
         rows.append({
             'date': formatted_date,
@@ -209,7 +208,6 @@ def aggregate_daily_totals(processed_dir: str, output_path: str) -> dict:
             'total_tickets': totals['total']
         })
     
-    # Write output
     if rows:
         with open(output_path, 'w', encoding='utf-8', newline='') as outfile:
             writer = csv.DictWriter(outfile, fieldnames=['date', 'adult_tickets', 'child_tickets', 'total_tickets'])
