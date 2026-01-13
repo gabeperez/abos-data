@@ -24,10 +24,8 @@ jobs:
       
       - name: Process new ticket CSV files
         run: |
-          # Create processed directory if it doesn't exist
           mkdir -p ticket-sales/processed
           
-          # Process any new Shift-JIS files in raw/
           for file in ticket-sales/raw/*.csv; do
             if [ -f "$file" ]; then
               echo "Processing: $file"
@@ -35,7 +33,6 @@ jobs:
             fi
           done
           
-          # Generate daily aggregation
           if [ -d "ticket-sales/processed" ]; then
             python scripts/process_tickets.py ticket-sales/processed/ --aggregate-daily --output-dir ticket-sales/processed/
           fi
@@ -52,14 +49,3 @@ jobs:
             git commit -m "Auto-process ticket sales CSVs [skip ci]"
             git push
           fi
-
-  notify-sync:
-    runs-on: ubuntu-latest
-    needs: process-tickets
-    if: always()
-    
-    steps:
-      - name: Notify completion
-        run: |
-          echo "Data processing complete at $(date)"
-          echo "Files processed and ready for Google Sheets sync"
