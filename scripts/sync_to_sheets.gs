@@ -12,16 +12,11 @@
  * 5. Run > setupTriggers
  */
 
-// ============================================
-// CONFIGURATION - UPDATE THESE VALUES
-// ============================================
 const CONFIG = {
-  // GitHub repository details
   GITHUB_OWNER: 'gabeperez',
   GITHUB_REPO: 'abos-data',
-  GITHUB_TOKEN: '', // Optional: for private repos, create a Personal Access Token
+  GITHUB_TOKEN: '',
   
-  // Google Sheet tab names
   SHEETS: {
     TICKET_SALES_RAW: 'Ticket Sales - Raw',
     TICKET_SALES_DAILY: 'Ticket Sales - Daily',
@@ -30,7 +25,6 @@ const CONFIG = {
     SYNC_LOG: 'Sync Log'
   },
   
-  // GitHub folder paths
   PATHS: {
     TICKET_SALES: 'ticket-sales/processed',
     AD_MONTHLY: 'ad-performance/monthly',
@@ -38,43 +32,23 @@ const CONFIG = {
   }
 };
 
-// ============================================
-// MAIN SYNC FUNCTIONS
-// ============================================
-
-/**
- * Main sync function - runs on schedule
- */
 function syncAllData() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   
   try {
-    // Sync ticket sales
     syncTicketSales(ss);
-    
-    // Sync ad performance
     syncAdPerformance(ss);
-    
-    // Update impact analysis
     updateImpactAnalysis(ss);
-    
-    // Log success
     logSync(ss, 'SUCCESS', 'All data synced successfully');
-    
   } catch (error) {
     logSync(ss, 'ERROR', error.toString());
     throw error;
   }
 }
 
-/**
- * Sync ticket sales data from GitHub
- */
 function syncTicketSales(ss) {
   const sheet = getOrCreateSheet(ss, CONFIG.SHEETS.TICKET_SALES_RAW);
   const files = listGitHubFiles(CONFIG.PATHS.TICKET_SALES);
-  
-  // Get already processed files
   const processedFiles = getProcessedFiles(sheet, 'snapshot_timestamp');
   
   let newRows = 0;
@@ -84,13 +58,11 @@ function syncTicketSales(ss) {
       const rows = parseCSV(csvData);
       
       if (rows.length > 1) {
-        // Append data (skip header if sheet already has data)
         const hasData = sheet.getLastRow() > 0;
         const dataToAppend = hasData ? rows.slice(1) : rows;
         
         if (dataToAppend.length > 0) {
           if (!hasData) {
-            // First time - add headers
             sheet.getRange(1, 1, 1, rows[0].length).setValues([rows[0]]);
           }
           sheet.getRange(sheet.getLastRow() + 1, 1, dataToAppend.length, dataToAppend[0].length)
@@ -101,7 +73,6 @@ function syncTicketSales(ss) {
     }
   }
   
-  // Update daily aggregation
   if (newRows > 0) {
     updateDailyAggregation(ss);
   }
@@ -109,9 +80,6 @@ function syncTicketSales(ss) {
   return newRows;
 }
 
-/**
- * Aggregate ticket sales by date
- */
 function updateDailyAggregation(ss) {
   const rawSheet = ss.getSheetByName(CONFIG.SHEETS.TICKET_SALES_RAW);
   const dailySheet = getOrCreateSheet(ss, CONFIG.SHEETS.TICKET_SALES_DAILY);
@@ -121,14 +89,12 @@ function updateDailyAggregation(ss) {
   const data = rawSheet.getDataRange().getValues();
   const headers = data[0];
   
-  // Find column indices
   const showDateIdx = headers.indexOf('show_date');
   const ticketTypeIdx = headers.indexOf('ticket_type_name');
   const ticketsSoldIdx = headers.indexOf('tickets_sold');
   
   if (showDateIdx === -1 || ticketsSoldIdx === -1) return;
   
-  // Aggregate by date
   const dailyTotals = {};
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
@@ -148,14 +114,12 @@ function updateDailyAggregation(ss) {
     dailyTotals[showDate].total += tickets;
   }
   
-  // Write to daily sheet
   dailySheet.clear();
   dailySheet.getRange(1, 1, 1, 4).setValues([['Date', 'Adult Tickets', 'Child Tickets', 'Total']]);
   
   const rows = Object.entries(dailyTotals)
     .sort((a, b) => a[0].localeCompare(b[0]))
     .map(([date, totals]) => {
-      // Format date
       const formatted = date.length === 8 
         ? `${date.slice(0,4)}-${date.slice(4,6)}-${date.slice(6,8)}`
         : date;
@@ -167,20 +131,13 @@ function updateDailyAggregation(ss) {
   }
 }
 
-/**
- * Sync ad performance data from GitHub
- */
 function syncAdPerformance(ss) {
   const sheet = getOrCreateSheet(ss, CONFIG.SHEETS.AD_PERFORMANCE);
   
-  // Fetch monthly files
   const monthlyFiles = listGitHubFiles(CONFIG.PATHS.AD_MONTHLY);
   const weeklyFiles = listGitHubFiles(CONFIG.PATHS.AD_WEEKLY);
   
   const allFiles = [...monthlyFiles, ...weeklyFiles];
-  
-  // Get existing data fingerprint
-  const existingRows = sheet.getLastRow();
   
   let allData = [];
   let headers = null;
@@ -193,11 +150,9 @@ function syncAdPerformance(ss) {
       if (rows.length > 1) {
         if (!headers) {
           headers = rows[0];
-          // Add source file column
           headers.push('source_file');
         }
         
-        // Add source file to each row
         for (let i = 1; i < rows.length; i++) {
           rows[i].push(file.name);
           allData.push(rows[i]);
@@ -215,9 +170,6 @@ function syncAdPerformance(ss) {
   return allData.length;
 }
 
-/**
- * Create impact analysis combining ticket sales and ad spend
- */
 function updateImpactAnalysis(ss) {
   const ticketSheet = ss.getSheetByName(CONFIG.SHEETS.TICKET_SALES_DAILY);
   const adSheet = ss.getSheetByName(CONFIG.SHEETS.AD_PERFORMANCE);
@@ -225,7 +177,6 @@ function updateImpactAnalysis(ss) {
   
   if (!ticketSheet || !adSheet) return;
   
-  // Get ticket data by date
   const ticketData = ticketSheet.getDataRange().getValues();
   const ticketByDate = {};
   for (let i = 1; i < ticketData.length; i++) {
@@ -237,7 +188,6 @@ function updateImpactAnalysis(ss) {
     };
   }
   
-  // Get ad data by date
   const adData = adSheet.getDataRange().getValues();
   const adHeaders = adData[0];
   const dayIdx = adHeaders.indexOf('Day');
@@ -262,7 +212,6 @@ function updateImpactAnalysis(ss) {
     adByDate[date].purchases += parseInt(row[purchasesIdx]) || 0;
   }
   
-  // Combine data
   const allDates = [...new Set([...Object.keys(ticketByDate), ...Object.keys(adByDate)])].sort();
   
   impactSheet.clear();
@@ -276,7 +225,7 @@ function updateImpactAnalysis(ss) {
     const ads = adByDate[date] || { spend: 0, impressions: 0, clicks: 0, purchases: 0 };
     
     const costPerTicket = tickets > 0 ? (ads.spend / tickets).toFixed(2) : '';
-    const roas = ads.spend > 0 ? ((tickets * 3500) / ads.spend).toFixed(2) : ''; // Assuming avg ticket ¥3500
+    const roas = ads.spend > 0 ? ((tickets * 3500) / ads.spend).toFixed(2) : '';
     const ctr = ads.impressions > 0 ? ((ads.clicks / ads.impressions) * 100).toFixed(2) + '%' : '';
     
     return [
@@ -290,21 +239,12 @@ function updateImpactAnalysis(ss) {
   }
 }
 
-// ============================================
-// GITHUB API HELPERS
-// ============================================
-
-/**
- * List files in a GitHub directory
- */
 function listGitHubFiles(path) {
   const url = `https://api.github.com/repos/${CONFIG.GITHUB_OWNER}/${CONFIG.GITHUB_REPO}/contents/${path}`;
   
   const options = {
     method: 'GET',
-    headers: {
-      'Accept': 'application/vnd.github.v3+json'
-    },
+    headers: { 'Accept': 'application/vnd.github.v3+json' },
     muteHttpExceptions: true
   };
   
@@ -319,7 +259,7 @@ function listGitHubFiles(path) {
     if (code === 200) {
       return JSON.parse(response.getContentText());
     } else if (code === 404) {
-      return []; // Directory doesn't exist yet
+      return [];
     } else {
       throw new Error(`GitHub API error: ${code}`);
     }
@@ -329,9 +269,6 @@ function listGitHubFiles(path) {
   }
 }
 
-/**
- * Fetch file content from GitHub
- */
 function fetchGitHubFile(path) {
   const url = `https://raw.githubusercontent.com/${CONFIG.GITHUB_OWNER}/${CONFIG.GITHUB_REPO}/main/${path}`;
   
@@ -348,13 +285,6 @@ function fetchGitHubFile(path) {
   return response.getContentText();
 }
 
-// ============================================
-// UTILITY FUNCTIONS
-// ============================================
-
-/**
- * Parse CSV string to 2D array
- */
 function parseCSV(csvString) {
   const rows = [];
   let currentRow = [];
@@ -368,7 +298,7 @@ function parseCSV(csvString) {
     if (char === '"') {
       if (insideQuotes && nextChar === '"') {
         currentCell += '"';
-        i++; // Skip next quote
+        i++;
       } else {
         insideQuotes = !insideQuotes;
       }
@@ -376,7 +306,7 @@ function parseCSV(csvString) {
       currentRow.push(currentCell);
       currentCell = '';
     } else if ((char === '\n' || char === '\r') && !insideQuotes) {
-      if (char === '\r' && nextChar === '\n') i++; // Handle \r\n
+      if (char === '\r' && nextChar === '\n') i++;
       currentRow.push(currentCell);
       if (currentRow.length > 0 && currentRow.some(c => c !== '')) {
         rows.push(currentRow);
@@ -388,7 +318,6 @@ function parseCSV(csvString) {
     }
   }
   
-  // Last row
   if (currentCell || currentRow.length > 0) {
     currentRow.push(currentCell);
     if (currentRow.some(c => c !== '')) {
@@ -399,9 +328,6 @@ function parseCSV(csvString) {
   return rows;
 }
 
-/**
- * Get or create a sheet by name
- */
 function getOrCreateSheet(ss, name) {
   let sheet = ss.getSheetByName(name);
   if (!sheet) {
@@ -410,9 +336,6 @@ function getOrCreateSheet(ss, name) {
   return sheet;
 }
 
-/**
- * Get set of already processed files based on a column value
- */
 function getProcessedFiles(sheet, columnName) {
   const processed = new Set();
   if (sheet.getLastRow() < 1) return processed;
@@ -430,38 +353,24 @@ function getProcessedFiles(sheet, columnName) {
   return processed;
 }
 
-/**
- * Log sync activity
- */
 function logSync(ss, status, message) {
   const logSheet = getOrCreateSheet(ss, CONFIG.SHEETS.SYNC_LOG);
   
-  // Add headers if empty
   if (logSheet.getLastRow() === 0) {
     logSheet.getRange(1, 1, 1, 3).setValues([['Timestamp', 'Status', 'Message']]);
   }
   
   logSheet.appendRow([new Date(), status, message]);
   
-  // Keep only last 100 logs
   if (logSheet.getLastRow() > 101) {
     logSheet.deleteRows(2, logSheet.getLastRow() - 101);
   }
 }
 
-// ============================================
-// TRIGGER SETUP
-// ============================================
-
-/**
- * Set up time-based trigger to run every hour
- */
 function setupTriggers() {
-  // Remove existing triggers
   const triggers = ScriptApp.getProjectTriggers();
   triggers.forEach(trigger => ScriptApp.deleteTrigger(trigger));
   
-  // Create hourly trigger
   ScriptApp.newTrigger('syncAllData')
     .timeBased()
     .everyHours(1)
@@ -470,9 +379,6 @@ function setupTriggers() {
   console.log('Trigger set up to run every hour');
 }
 
-/**
- * Manual sync trigger (for testing)
- */
 function manualSync() {
   syncAllData();
 }
